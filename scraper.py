@@ -12,7 +12,12 @@ from urllib3.util.retry import Retry
 
 
 class ImageScraper:
-    USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    # Google frequently serves different markup depending on UA; keep this reasonably current.
+    USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/122.0.0.0 Safari/537.36"
+    )
 
     def __init__(self, timeout: int = 10, max_retries: int = 3):
         self.timeout = timeout
@@ -52,8 +57,30 @@ class ImageScraper:
         if not url:
             return ""
         url = url.replace("&quot;", "").replace("&amp;", "&").replace("\\/", "/").strip()
+        url = url.strip().strip("\"'")
+        while url and url[-1] in ")]}>":
+            url = url[:-1]
         # Do not split on commas here; commas appear in valid URLs and in `srcset` strings.
         return url.strip()
+
+    def _looks_like_image_url(self, url: str) -> bool:
+        if not url:
+            return False
+        base = url.split("?", 1)[0].split("#", 1)[0].lower()
+        return any(
+            base.endswith(ext)
+            for ext in [
+                ".jpg",
+                ".jpeg",
+                ".png",
+                ".gif",
+                ".webp",
+                ".bmp",
+                ".tif",
+                ".tiff",
+                ".svg",
+            ]
+        )
 
     def _is_likely_thumbnail(self, url: str) -> bool:
         if not url:
@@ -97,7 +124,8 @@ class ImageScraper:
 
     def scrape_google(self, query: str, num_images: int = 50) -> List[str]:
         images: Set[str] = set()
-        url = f"https://www.google.com/search?q={quote(query)}&tbm=isch&ijn=0"
+        # Current Google Images HTML is commonly served under `udm=2`.
+        url = f"https://www.google.com/search?q={quote(query)}&udm=2&hl=en&gl=us"
 
         try:
             headers = self._get_headers()
@@ -105,14 +133,26 @@ class ImageScraper:
             response = self.session.get(url, headers=headers, timeout=self.timeout)
             response.raise_for_status()
 
-            for pattern in [r'"ou":"([^"]+)"', r'"imgurl":"([^"]+)"']:
-                for match in re.findall(pattern, response.text):
-                    match = self._clean_url(match)
-                    if self._validate_url(match) and not self._is_likely_thumbnail(match):
-                        images.add(match)
+            # Primary extraction for current markup: pull absolute URLs and keep the ones
+            # that look like direct image files.
+            text = html.unescape(response.text)
+            for candidate in re.findall(r"https?://[^\s\"<>]+", text):
+                candidate = self._clean_url(candidate)
+                if not self._validate_url(candidate):
+                    continue
+                if self._is_likely_thumbnail(candidate):
+                    continue
+                if not self._looks_like_image_url(candidate):
+                    continue
+                images.add(candidate)
 
-            # Note: <img src> / data-src on Google Images are frequently thumbnails.
-            # Prefer full-resolution URLs from embedded JSON patterns above.
+            # Fallback 1: older embedded JSON keys (rarely present now, but keep it).
+            if len(images) < min(5, num_images):
+                for pattern in [r'"ou":"([^"]+)"', r'"imgurl":"([^"]+)"']:
+                    for match in re.findall(pattern, text):
+                        match = self._clean_url(match)
+                        if self._validate_url(match) and not self._is_likely_thumbnail(match):
+                            images.add(match)
 
         except requests.RequestException as e:
             print(f"Error: {e}", file=sys.stderr)
