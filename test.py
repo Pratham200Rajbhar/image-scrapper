@@ -2,7 +2,7 @@ import requests
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-URL = "http://127.0.0.1:8000/scrape"
+URL = "http://159.89.166.91:8001/scrape"
 
 HEADERS = {
     "accept": "application/json"

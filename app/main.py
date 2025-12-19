@@ -1,5 +1,5 @@
 import time
-from scraper import ImageScraper
+from app.scraper import ImageScraper
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from langchain_core.messages import HumanMessage
@@ -8,8 +8,8 @@ from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
 from redis import Redis
 from fastapi_cache.decorator import cache
-from llm import get_ollama_model
-from llm import get_google_model
+from app.llm import get_ollama_model
+from app.llm import get_google_model
 import os
 
 load_dotenv()
@@ -40,8 +40,16 @@ async def logs(request, call_next):
 
 @app.on_event("startup")
 def startup():
-    redis = Redis(host="localhost", port=6379, db=0)
-    FastAPICache.init(RedisBackend(redis), prefix="image-scraper")
+    redis_client = Redis(host="localhost", port=6379, db=0)
+    
+    original_set = redis_client.set
+    def logged_set(name, *args, **kwargs):
+        print(f" [REDIS UPDATE] Key: {name}")
+        return original_set(name, *args, **kwargs)
+    
+    redis_client.set = logged_set
+    FastAPICache.init(RedisBackend(redis_client), prefix="image-scraper")
+    print("Redis caching initialized with logging.")
 
 
 @app.get("/scrape")
