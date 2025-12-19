@@ -2,7 +2,7 @@ import html
 import json
 import re
 from typing import List, Set, Dict, Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -16,6 +16,13 @@ class ImageScraper:
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/122.0.0.0 Safari/537.36"
     )
+    BLOCKED_DOMAINS = {
+        "researchgate.net",
+        "www.researchgate.net",
+        "localhost",
+        "127.0.0.1",
+    }
+    SUPPORTED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg")
 
     def __init__(self, timeout: int = 10, max_retries: int = 3):
         self.timeout = timeout
@@ -51,13 +58,22 @@ class ImageScraper:
         )
 
     def _is_valid_image(self, url: str) -> bool:
-        if not url.startswith(("http://", "https://")):
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
             return False
-        if any(x in url.lower() for x in ["gstatic", "doubleclick", "bing.com/th"]):
+
+        host = (parsed.hostname or "").lower()
+        if host in self.BLOCKED_DOMAINS:
             return False
-        return url.lower().split("?", 1)[0].endswith(
-            (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg")
-        )
+
+        lower_url = url.lower()
+        if any(x in lower_url for x in ["gstatic", "doubleclick", "bing.com/th"]):
+            return False
+        if lower_url.endswith(".webp"):
+            return False
+
+        path = (parsed.path or "").lower()
+        return path.endswith(self.SUPPORTED_EXTENSIONS)
 
     def scrape_google(self, query: str, num_images: int) -> List[str]:
         url = f"https://www.google.com/search?q={quote(query)}&udm=2"

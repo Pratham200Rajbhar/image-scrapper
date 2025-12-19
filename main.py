@@ -22,6 +22,7 @@ if os.getenv("LLM_PROVIDER") == "OLLAMA":
 else:
     model = get_google_model()
 
+
 @app.get("/")
 def root():
     return {"message": "Image Scraper API", "endpoint": "/scrape"}
@@ -29,6 +30,7 @@ def root():
 
 @app.middleware("http")
 async def logs(request, call_next):
+    print(f"Incoming request: {request.method} {request.url.path}")
     start_time = time.time()
     response = await call_next(request)
     process_time = (time.time() - start_time) * 1000
@@ -41,8 +43,9 @@ def startup():
     redis = Redis(host="localhost", port=6379, db=0)
     FastAPICache.init(RedisBackend(redis), prefix="image-scraper")
 
+
 @app.get("/scrape")
-@cache(expire=3600) 
+@cache(expire=3600)
 def scrape_images(
     query: str = Query(...),
     engine: str = Query("bing"),
@@ -72,7 +75,13 @@ def optimize_query(prompt: str) -> str:
         ]
     )
 
-    if (os.getenv("LLM_PROVIDER") == "OLLAMA"):
+    if os.getenv("LLM_PROVIDER") == "OLLAMA":
         return response.content.strip()
     else:
         return response.strip()
+
+
+print("Image Scraper API is running...")
+import socket
+
+print(f"Server IP Address: {socket.gethostbyname(socket.gethostname())}")
