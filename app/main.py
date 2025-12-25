@@ -8,8 +8,7 @@ from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
 from redis import Redis
 from fastapi_cache.decorator import cache
-from app.llm import get_ollama_model
-from app.llm import get_google_model
+from app.llm import get_ollama_model, get_google_model, get_openrouter_model
 import os
 
 load_dotenv()
@@ -19,8 +18,10 @@ scraper = ImageScraper()
 
 if os.getenv("LLM_PROVIDER") == "OLLAMA":
     model = get_ollama_model()
+    fallback_model = None
 else:
     model = get_google_model()
+    fallback_model = get_openrouter_model()
 
 
 @app.get("/")
@@ -76,17 +77,30 @@ def optimize_query(prompt: str) -> str:
         "- Focus on visual keywords"
     )
 
-    response = model.invoke(
-        [
-            HumanMessage(content=system_prompt),
-            HumanMessage(content=prompt),
-        ]
-    )
+    messages = [
+        HumanMessage(content=system_prompt),
+        HumanMessage(content=prompt),
+    ]
 
-    if os.getenv("LLM_PROVIDER") == "OLLAMA":
-        return response.content.strip()
-    else:
+    try:
+        response = model.invoke(messages)
+        if hasattr(response, "content"):
+            return response.content.strip()
         return response.strip()
+    except Exception as e:
+        print(f"Primary model failed: {e}")
+        if fallback_model:
+            print("Switching to fallback model (OpenRouter)...")
+            try:
+                response = fallback_model.invoke(messages)
+                if hasattr(response, "content"):
+                    return response.content.strip()
+                return response.strip()
+            except Exception as fe:
+                print(f"Fallback model also failed: {fe}")
+                raise HTTPException(status_code=500, detail="All LLM providers failed")
+        else:
+            raise HTTPException(status_code=500, detail=f"LLM request failed: {e}")
 
 
 print("Image Scraper API is running...")
